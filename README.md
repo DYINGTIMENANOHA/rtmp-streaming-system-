@@ -88,6 +88,27 @@ SRS 是流媒体服务器，负责接收 OBS 推流并转发给 frpc。
 ```
    
 5. **下载，解压并复制内容到frpc文件夹，然后配置 frpc**
+   frpc 负责将本地 SRS 的流量转发到公网服务器。
+
+   #### Windows
+
+   1. **下载 frpc**
+   
+      访问: https://github.com/fatedier/frp/releases
+   
+      下载最新版本，例如: `frp_0.53.0_windows_amd64.zip`
+
+   2. **解压**
+   
+      从压缩包中提取 `frpc.exe` 文件
+
+   3. **放到项目目录**
+      ```
+         rtmp-streaming-system/
+         └── frpc/
+             └── frpc.exe        ← 只需要这个文件
+      ```
+
    在 `frpc/` 目录下创建 `frpc.toml` 文件：
 ```toml
    # frpc 配置文件
