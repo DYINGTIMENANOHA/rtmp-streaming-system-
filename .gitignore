@@ -1,0 +1,13 @@
+user_config.json
+
+srs/
+frpc/
+
+auth/valid_tokens.json
+auth/access.log
+
+*.log
+
+__pycache__/
+*.pyc
+venv/
