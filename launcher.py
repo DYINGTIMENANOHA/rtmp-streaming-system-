@@ -9,6 +9,7 @@ import secrets
 from pathlib import Path
 import platform
 import sys
+from datetime import datetime
 
 class StreamingLauncher:
     def __init__(self):
@@ -19,14 +20,21 @@ class StreamingLauncher:
         self.root_dir = Path(__file__).parent
         self.is_windows = platform.system() == "Windows"
         self.token_file = self.root_dir / "auth" / "valid_tokens.json"
+        self.sessions_file = self.root_dir / "auth" / "active_sessions.json"
         self.config_file = self.root_dir / "user_config.json"
         
         self.processes = []
         self.is_running = False
         
+        # 会话超时时间（秒）- 与 server.py 保持一致
+        self.SESSION_TIMEOUT = 30
+        
         self._create_widgets()
         self._load_config()
         self._refresh_token_list()
+        
+        # 启动自动刷新
+        self._auto_refresh()
         
     def _create_widgets(self):
         # 创建 Notebook（标签页）
@@ -199,7 +207,7 @@ class StreamingLauncher:
         
         subtitle = ttk.Label(
             parent,
-            text="⚠️ 每个 Token 同时只允许 1 人观看",
+            text="⚠️ 每个 Token 同时只允许 1 人观看 | 自动刷新：每5秒",
             font=("Arial", 10),
             foreground="red"
         )
@@ -214,7 +222,7 @@ class StreamingLauncher:
         list_frame.pack(side="left", fill="both", expand=True)
         
         # 列标题
-        columns = ("token", "status")
+        columns = ("token", "status", "ip")
         self.token_tree = ttk.Treeview(
             list_frame, 
             columns=columns, 
@@ -225,10 +233,12 @@ class StreamingLauncher:
         self.token_tree.heading("#0", text="序号")
         self.token_tree.heading("token", text="Token")
         self.token_tree.heading("status", text="状态")
+        self.token_tree.heading("ip", text="使用者IP")
         
         self.token_tree.column("#0", width=50, anchor="center")
-        self.token_tree.column("token", width=350)
+        self.token_tree.column("token", width=300)
         self.token_tree.column("status", width=100, anchor="center")
+        self.token_tree.column("ip", width=150, anchor="center")
         
         # 滚动条
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.token_tree.yview)
@@ -275,6 +285,13 @@ class StreamingLauncher:
             button_frame,
             text="🔄 刷新列表",
             command=self._refresh_token_list,
+            width=18
+        ).pack(pady=5)
+
+        ttk.Button(
+            button_frame,
+            text="🔄 清空列表释放资源",
+            command=self.empty_token_list,
             width=18
         ).pack(pady=5)
         
@@ -407,26 +424,99 @@ class StreamingLauncher:
         with open(self.token_file, 'w', encoding='utf-8') as f:
             json.dump(tokens, f, indent=2, ensure_ascii=False)
     
+    def _load_active_sessions(self):
+        """加载活跃会话"""
+        if not self.sessions_file.exists():
+            return {}
+        
+        try:
+            with open(self.sessions_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {}
+    
+    def _get_token_status(self, token):
+        """获取 token 的状态和使用者IP（带超时检查）"""
+        sessions = self._load_active_sessions()
+        
+        if token in sessions:
+            session = sessions[token]
+            ip = session.get('ip', '未知')
+            
+            # # 检查是否超时（30秒，与 server.py 保持一致）
+            # try:
+            #     last_heartbeat = datetime.strptime(session['last_heartbeat'], '%Y-%m-%d %H:%M:%S')
+            #     time_diff = (datetime.now() - last_heartbeat).total_seconds()
+                
+            #     if time_diff > self.SESSION_TIMEOUT:
+            #         # 已超时，实际上已经空闲
+            #         return "⚪ 空闲", "-"
+            # except:
+            #     # 数据格式错误，视为空闲
+            #     return "⚪ 空闲", "-"
+            
+            return "🟢 使用中", ip
+        else:
+            return "⚪ 空闲", "-"
+    
+    def empty_token_list(self):
+        sessions = self._load_active_sessions()
+        
+        for token in sessions:
+            del sessions[token]
+            with open(self.root_dir / "auth" / "active_sessions.json", 'w', encoding='utf-8') as f:
+                json.dump(sessions, f, indent=2, ensure_ascii=False)
+        
+        return
+
+
     def _refresh_token_list(self):
         """刷新 Token 列表显示"""
+        # 保存当前选中的项
+        current_selection = None
+        selection = self.token_tree.selection()
+        if selection:
+            item = self.token_tree.item(selection[0])
+            current_selection = item['values'][0] if item['values'] else None
+        
+        # 清空列表
         for item in self.token_tree.get_children():
             self.token_tree.delete(item)
         
         tokens = self._load_tokens()
         
+        # 重新填充列表
         for i, token in enumerate(tokens, 1):
-            self.token_tree.insert(
+            status, ip = self._get_token_status(token)
+            
+            item_id = self.token_tree.insert(
                 "", 
                 "end", 
                 text=str(i),
-                values=(token, "未使用"),
+                values=(token, status, ip),
                 tags=("token",)
             )
+            
+            # 恢复之前的选中状态
+            if current_selection and token == current_selection:
+                self.token_tree.selection_set(item_id)
+                self.token_tree.focus(item_id)
+                self.token_tree.see(item_id)
         
         if not tokens:
             self._update_detail("暂无 Token，点击'生成新 Token'创建")
+    
+    def _auto_refresh(self):
+        """每5秒自动刷新一次 token 状态"""
+        try:
+            # 只在 token_tree 存在时刷新
+            if hasattr(self, 'token_tree') and self.token_tree.winfo_exists():
+                self._refresh_token_list()
+        except:
+            pass
         
-        self._log(f"已加载 {len(tokens)} 个 Token")
+        # 5秒后再次执行
+        self.root.after(5000, self._auto_refresh)
     
     def _on_token_select(self, event):
         """Token 选择事件"""
@@ -436,10 +526,14 @@ class StreamingLauncher:
         
         item = self.token_tree.item(selection[0])
         token = item['values'][0]
+        status = item['values'][1]
+        ip = item['values'][2]
         
         watch_url = self._get_watch_url(token)
         
         detail = f"""Token: {token}
+状态: {status}
+使用者IP: {ip}
 
 观看地址:
 {watch_url}
@@ -578,22 +672,22 @@ class StreamingLauncher:
         
         try:
             # 1. 启动验证服务器
-            self._log("► 启动验证服务器 (auth/server.py)...")
+            self._log("▶ 启动验证服务器 (auth/server.py)...")
             self._start_auth_server()
             time.sleep(2)
             
             # 2. 启动 SRS
-            self._log("► 启动 SRS (srs/srs-live.bat)...")
+            self._log("▶ 启动 SRS (srs/srs-live.bat)...")
             self._start_srs()
             time.sleep(2)
             
             # 3. 启动 frpc
-            self._log("► 启动 frpc (frpc/frpc.exe)...")
+            self._log("▶ 启动 frpc (frpc/frpc.exe)...")
             self._start_frpc()
             time.sleep(2)
             
             self._log("="*50)
-            self._log("✓ 所有服务启动完成！")
+            self._log("✓ 所有服务启动完成!")
             self._log("")
             self._log("下一步:")
             self._log("1. 切换到'Token 管理'标签页生成观看链接")
@@ -658,12 +752,25 @@ class StreamingLauncher:
             proc.terminate()
         
         self.processes = []
+        
+        # 清空活跃会话文件
+        if self.sessions_file.exists():
+            try:
+                with open(self.sessions_file, 'w', encoding='utf-8') as f:
+                    json.dump({}, f)
+                self._log("✓ 已清空活跃会话记录")
+            except Exception as e:
+                self._log(f"⚠ 清空会话记录失败: {e}")
+        
         self.is_running = False
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
         self.status_label.config(text="系统已停止")
         self._log("✓ 系统已停止")
         self._log("="*50)
+        
+        # 刷新 token 列表以更新状态
+        self._refresh_token_list()
         
         if self.is_windows:
             self._log("")

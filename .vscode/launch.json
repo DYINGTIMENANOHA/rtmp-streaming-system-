@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "🐍 Launch Python Project",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launcher.py",
+            "python": "${command:python.interpreterPath}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
