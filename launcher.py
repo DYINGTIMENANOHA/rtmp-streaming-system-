@@ -20,14 +20,10 @@ class StreamingLauncher:
         self.root_dir = Path(__file__).parent
         self.is_windows = platform.system() == "Windows"
         self.token_file = self.root_dir / "auth" / "valid_tokens.json"
-        self.sessions_file = self.root_dir / "auth" / "active_sessions.json"
         self.config_file = self.root_dir / "user_config.json"
         
         self.processes = []
         self.is_running = False
-        
-        # 会话超时时间（秒）- 与 server.py 保持一致
-        self.SESSION_TIMEOUT = 30
         
         self._create_widgets()
         self._load_config()
@@ -207,9 +203,9 @@ class StreamingLauncher:
         
         subtitle = ttk.Label(
             parent,
-            text="⚠️ 每个 Token 同时只允许 1 人观看 | 自动刷新：每5秒",
+            text="✓ 每个 Token 可供多人同时观看 | 自动刷新:每5秒",
             font=("Arial", 10),
-            foreground="red"
+            foreground="green"
         )
         subtitle.pack()
         
@@ -222,7 +218,7 @@ class StreamingLauncher:
         list_frame.pack(side="left", fill="both", expand=True)
         
         # 列标题
-        columns = ("token", "status", "ip")
+        columns = ("token",)
         self.token_tree = ttk.Treeview(
             list_frame, 
             columns=columns, 
@@ -232,13 +228,9 @@ class StreamingLauncher:
         
         self.token_tree.heading("#0", text="序号")
         self.token_tree.heading("token", text="Token")
-        self.token_tree.heading("status", text="状态")
-        self.token_tree.heading("ip", text="使用者IP")
         
         self.token_tree.column("#0", width=50, anchor="center")
-        self.token_tree.column("token", width=300)
-        self.token_tree.column("status", width=100, anchor="center")
-        self.token_tree.column("ip", width=150, anchor="center")
+        self.token_tree.column("token", width=400)
         
         # 滚动条
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.token_tree.yview)
@@ -285,13 +277,6 @@ class StreamingLauncher:
             button_frame,
             text="🔄 刷新列表",
             command=self._refresh_token_list,
-            width=18
-        ).pack(pady=5)
-
-        ttk.Button(
-            button_frame,
-            text="🔄 清空列表释放资源",
-            command=self.empty_token_list,
             width=18
         ).pack(pady=5)
         
@@ -406,7 +391,7 @@ class StreamingLauncher:
         stream_name = self.stream_name.get().strip() or "stream"
         
         return f"rtmp://{frp_server}:{remote_port}/{app_name}/{stream_name}?token={token}"
-    
+
     def _load_tokens(self):
         """加载 Token 列表"""
         if not self.token_file.exists():
@@ -424,52 +409,6 @@ class StreamingLauncher:
         with open(self.token_file, 'w', encoding='utf-8') as f:
             json.dump(tokens, f, indent=2, ensure_ascii=False)
     
-    def _load_active_sessions(self):
-        """加载活跃会话"""
-        if not self.sessions_file.exists():
-            return {}
-        
-        try:
-            with open(self.sessions_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
-    
-    def _get_token_status(self, token):
-        """获取 token 的状态和使用者IP（带超时检查）"""
-        sessions = self._load_active_sessions()
-        
-        if token in sessions:
-            session = sessions[token]
-            ip = session.get('ip', '未知')
-            
-            # # 检查是否超时（30秒，与 server.py 保持一致）
-            # try:
-            #     last_heartbeat = datetime.strptime(session['last_heartbeat'], '%Y-%m-%d %H:%M:%S')
-            #     time_diff = (datetime.now() - last_heartbeat).total_seconds()
-                
-            #     if time_diff > self.SESSION_TIMEOUT:
-            #         # 已超时，实际上已经空闲
-            #         return "⚪ 空闲", "-"
-            # except:
-            #     # 数据格式错误，视为空闲
-            #     return "⚪ 空闲", "-"
-            
-            return "🟢 使用中", ip
-        else:
-            return "⚪ 空闲", "-"
-    
-    def empty_token_list(self):
-        sessions = self._load_active_sessions()
-        
-        for token in sessions:
-            del sessions[token]
-            with open(self.root_dir / "auth" / "active_sessions.json", 'w', encoding='utf-8') as f:
-                json.dump(sessions, f, indent=2, ensure_ascii=False)
-        
-        return
-
-
     def _refresh_token_list(self):
         """刷新 Token 列表显示"""
         # 保存当前选中的项
@@ -487,13 +426,11 @@ class StreamingLauncher:
         
         # 重新填充列表
         for i, token in enumerate(tokens, 1):
-            status, ip = self._get_token_status(token)
-            
             item_id = self.token_tree.insert(
                 "", 
                 "end", 
                 text=str(i),
-                values=(token, status, ip),
+                values=(token,),
                 tags=("token",)
             )
             
@@ -504,7 +441,7 @@ class StreamingLauncher:
                 self.token_tree.see(item_id)
         
         if not tokens:
-            self._update_detail("暂无 Token，点击'生成新 Token'创建")
+            self._update_detail("暂无 Token,点击'生成新 Token'创建")
     
     def _auto_refresh(self):
         """每5秒自动刷新一次 token 状态"""
@@ -526,20 +463,16 @@ class StreamingLauncher:
         
         item = self.token_tree.item(selection[0])
         token = item['values'][0]
-        status = item['values'][1]
-        ip = item['values'][2]
         
         watch_url = self._get_watch_url(token)
         
         detail = f"""Token: {token}
-状态: {status}
-使用者IP: {ip}
 
 观看地址:
 {watch_url}
 
-提示: 此 Token 同时只允许 1 人观看
-分享此链接给观看者，在 VLC 中打开网络串流即可观看"""
+提示: 此 Token 支持多人同时观看
+分享此链接给观看者,在 VLC 中打开网络串流即可观看"""
         
         self._update_detail(detail)
     
@@ -734,11 +667,18 @@ class StreamingLauncher:
         
         if self.is_windows:
             # 直接运行 frpc.exe
-            cmd = f'start "frpc" /D "{frpc_dir}" frpc.exe -c frpc.toml'
+            # cmd = f'start "frpc" /D "{frpc_dir}" frpc.exe -c frpc.toml'
+            cmd = f'start "frpc" /D "{frpc_dir}" frpc.exe -c frpchongkong.toml'
             subprocess.Popen(cmd, shell=True)
         else:
+            # proc = subprocess.Popen(
+            #     ["./frpc", "-c", "frpc.toml"],
+            #     cwd=frpc_dir
+            # )
+            # self.processes.append(proc)
+
             proc = subprocess.Popen(
-                ["./frpc", "-c", "frpc.toml"],
+                ["./frpc", "-c", "frpchongkong.toml"],
                 cwd=frpc_dir
             )
             self.processes.append(proc)
@@ -752,15 +692,6 @@ class StreamingLauncher:
             proc.terminate()
         
         self.processes = []
-        
-        # 清空活跃会话文件
-        if self.sessions_file.exists():
-            try:
-                with open(self.sessions_file, 'w', encoding='utf-8') as f:
-                    json.dump({}, f)
-                self._log("✓ 已清空活跃会话记录")
-            except Exception as e:
-                self._log(f"⚠ 清空会话记录失败: {e}")
         
         self.is_running = False
         self.start_btn.config(state="normal")
